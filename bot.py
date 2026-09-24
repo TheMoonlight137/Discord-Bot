@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 import asyncio
 import subprocess
 import os
+
 load_dotenv()
 
 FISCH_SEASONS = [
