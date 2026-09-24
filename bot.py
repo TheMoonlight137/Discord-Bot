@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 import asyncio
 import subprocess
 import os
+import sys
 
 load_dotenv()
 
@@ -20,6 +21,8 @@ FISCH_ANCHOR = datetime(2026, 8, 19, 0, 0, tzinfo=timezone.utc)
 FISCH_ANCHOR_SEASON = 2  # Autumn
 
 LOG_CHANNEL_ID = 1489182661401514084
+REPO_DIR = "/home/moonlight/Projects/discord-bot"
+TZ8 = timezone(timedelta(hours=8))
 
 TRIALS = [
     {
@@ -152,6 +155,51 @@ async def on_ready():
         await channel.send("bot restarted!")
     except (discord.HTTPException, discord.Forbidden, discord.NotFound):
         pass
+    bot.loop.create_task(github_sync_loop())
+
+
+def run_git(*args):
+    return subprocess.run(
+        ["git", "-C", REPO_DIR, *args],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+async def sync_from_github():
+    if run_git("fetch", "github", "main").returncode != 0:
+        return False, "fetch from github failed"
+    head = run_git("rev-parse", "HEAD").stdout.strip()
+    remote = run_git("rev-parse", "github/main").stdout.strip()
+    if head == remote:
+        return False, "no new changes"
+    if run_git("status", "--porcelain").stdout.strip():
+        return False, "local changes present, skipped"
+    if run_git("merge", "--ff-only", "github/main").returncode != 0:
+        return False, "not fast-forwardable, skipped"
+    check = subprocess.run(
+        [sys.executable, "-m", "py_compile", os.path.join(REPO_DIR, "bot.py")],
+        capture_output=True,
+    )
+    if check.returncode != 0:
+        run_git("reset", "--hard", head)
+        return False, "pulled code failed to compile, rolled back"
+    return True, f"updated to {remote[:7]}"
+
+
+async def github_sync_loop():
+    while True:
+        now = datetime.now(TZ8)
+        today12 = now.replace(hour=12, minute=0, second=0, microsecond=0)
+        tomorrow00 = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
+        delay = next(
+            ((t - now).total_seconds() for t in (today12, tomorrow00) if t > now),
+            12 * 3600,
+        )
+        await asyncio.sleep(delay + 5)
+        changed, detail = await sync_from_github()
+        print(f"[github-sync] {detail}", flush=True)
 
 
 async def update_fisch_status():
