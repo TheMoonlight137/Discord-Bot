@@ -19,6 +19,8 @@ FISCH_SEASON_MINUTES = 576
 FISCH_ANCHOR = datetime(2026, 8, 19, 0, 0, tzinfo=timezone.utc)
 FISCH_ANCHOR_SEASON = 2  # Autumn
 
+LOG_CHANNEL_ID = 1489182661401514084
+
 TRIALS = [
     {
         "name": "Speedy Enemies",
@@ -145,6 +147,11 @@ async def on_ready():
     synced = await bot.tree.sync()
     bot.loop.create_task(update_fisch_status())
     print(f"Logged in as {bot.user} — synced {len(synced)} commands", flush=True)
+    try:
+        channel = bot.get_channel(LOG_CHANNEL_ID) or await bot.fetch_channel(LOG_CHANNEL_ID)
+        await channel.send("bot restarted!")
+    except (discord.HTTPException, discord.Forbidden, discord.NotFound):
+        pass
 
 
 async def update_fisch_status():
