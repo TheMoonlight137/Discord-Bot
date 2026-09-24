@@ -163,7 +163,7 @@ async def update_fisch_status():
         await bot.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.playing,
-                name="Fisch: Seasons",
+                name="Fisch: Seasons [AUTORELOAD TEST]",
                 state=f"{current_season['emoji']} {current_season['name']} ends in {rem_h}h {rem_m}m",
             )
         )
