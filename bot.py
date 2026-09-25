@@ -448,7 +448,7 @@ async def serverstatus(interaction: discord.Interaction):
         value="Online" if custom else "Offline",
         inline=False,
     )
-    await interaction.response.send_message(embed=embed, ephemeral=True)
+    await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(
