@@ -434,14 +434,21 @@ async def serverstatus(interaction: discord.Interaction):
     block_survival = is_active("minecraft.service")
     custom = is_active("minecraft-customs.service")
 
-    lines = [
-        "🖥 Minecraft Server Status",
-        "Online" if block_survival else "Offline",
-        f"{'✅' if block_survival else '❌'} Block Survival",
-        "Online" if custom else "Offline",
-        f"{'✅' if custom else '❌'} Other servers",
-    ]
-    await interaction.response.send_message("\n".join(lines), ephemeral=True)
+    embed = discord.Embed(
+        title="🖥 Minecraft Server Status",
+        color=discord.Color.green() if (block_survival or custom) else discord.Color.red(),
+    )
+    embed.add_field(
+        name=f"{'✅' if block_survival else '❌'} Block Survival",
+        value="Online" if block_survival else "Offline",
+        inline=False,
+    )
+    embed.add_field(
+        name=f"{'✅' if custom else '❌'} Other servers",
+        value="Online" if custom else "Offline",
+        inline=False,
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 @bot.tree.command(
