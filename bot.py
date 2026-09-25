@@ -9,6 +9,7 @@ import os
 import sys
 
 load_dotenv()
+
 FISCH_SEASONS = [
     {"name": "Spring", "emoji": "🌸"},
     {"name": "Summer", "emoji": "☀️"},
