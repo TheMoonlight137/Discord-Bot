@@ -439,13 +439,13 @@ async def serverstatus(interaction: discord.Interaction):
         color=discord.Color.green() if (block_survival or custom) else discord.Color.red(),
     )
     embed.add_field(
-        name=f"{'✅' if block_survival else '❌'} Block Survival",
-        value="Online" if block_survival else "Offline",
+        name="Online" if block_survival else "Offline",
+        value=f"{'✅' if block_survival else '❌'} Block Survival",
         inline=False,
     )
     embed.add_field(
-        name=f"{'✅' if custom else '❌'} Other servers",
-        value="Online" if custom else "Offline",
+        name="Online" if custom else "Offline",
+        value=f"{'✅' if custom else '❌'} Other servers",
         inline=False,
     )
     await interaction.response.send_message(embed=embed)
