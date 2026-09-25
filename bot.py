@@ -415,6 +415,35 @@ async def closeserver(interaction: discord.Interaction, server: app_commands.Cho
 
 
 @bot.tree.command(
+    name="serverstatus",
+    description="Shows Minecraft server status",
+)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.allowed_installs(guilds=True, users=True)
+async def serverstatus(interaction: discord.Interaction):
+    def is_active(service):
+        result = subprocess.run(
+            ["systemctl", "--user", "is-active", service],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        return result.stdout.strip() == "active"
+
+    block_survival = is_active("minecraft.service")
+    custom = is_active("minecraft-customs.service")
+
+    lines = [
+        "🖥 Minecraft Server Status",
+        "Online" if block_survival else "Offline",
+        f"{'✅' if block_survival else '❌'} Block Survival",
+        "Online" if custom else "Offline",
+        f"{'✅' if custom else '❌'} Other servers",
+    ]
+    await interaction.response.send_message("\n".join(lines), ephemeral=True)
+
+
+@bot.tree.command(
     name="thhelp",
     description="Lists all Trial Helper commands",
 )
@@ -448,7 +477,8 @@ async def thhelp(interaction: discord.Interaction):
         name="🖥 Minecraft Server",
         value=(
             "`/hostserver` — Start a server\n"
-            "`/closeserver` — Stop a server"
+            "`/closeserver` — Stop a server\n"
+            "`/serverstatus` — Server status"
         ),
         inline=False,
     )
