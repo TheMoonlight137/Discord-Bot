@@ -6,9 +6,12 @@ from datetime import datetime, timezone, timedelta
 import asyncio
 import subprocess
 import os
-import sys
 
 load_dotenv()
+
+COLOR_SUCCESS = discord.Color.green()
+COLOR_FAIL = discord.Color.red()
+COLOR_NATURAL = discord.Color.from_rgb(0x4D, 0xFF, 0xF0)
 
 FISCH_SEASONS = [
     {"name": "Spring", "emoji": "🌸"},
@@ -19,10 +22,6 @@ FISCH_SEASONS = [
 FISCH_SEASON_MINUTES = 576
 FISCH_ANCHOR = datetime(2026, 8, 19, 0, 0, tzinfo=timezone.utc)
 FISCH_ANCHOR_SEASON = 2  # Autumn
-
-LOG_CHANNEL_ID = 1489182661401514084
-REPO_DIR = "/home/moonlight/Projects/discord-bot"
-TZ8 = timezone(timedelta(hours=8))
 
 TRIALS = [
     {
@@ -141,6 +140,8 @@ def format_trial(trial, index):
 
 intents = discord.Intents.default()
 intents.message_content = True
+intents.members = True
+intents.presences = True
 
 bot = commands.Bot(command_prefix="!", intents=intents)
 
@@ -150,56 +151,6 @@ async def on_ready():
     synced = await bot.tree.sync()
     bot.loop.create_task(update_fisch_status())
     print(f"Logged in as {bot.user} — synced {len(synced)} commands", flush=True)
-    try:
-        channel = bot.get_channel(LOG_CHANNEL_ID) or await bot.fetch_channel(LOG_CHANNEL_ID)
-        await channel.send("bot restarted!")
-    except (discord.HTTPException, discord.Forbidden, discord.NotFound):
-        pass
-    bot.loop.create_task(github_sync_loop())
-
-
-def run_git(*args):
-    return subprocess.run(
-        ["git", "-C", REPO_DIR, *args],
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-
-
-async def sync_from_github():
-    if run_git("fetch", "github", "main").returncode != 0:
-        return False, "fetch from github failed"
-    head = run_git("rev-parse", "HEAD").stdout.strip()
-    remote = run_git("rev-parse", "github/main").stdout.strip()
-    if head == remote:
-        return False, "no new changes"
-    if run_git("status", "--porcelain").stdout.strip():
-        return False, "local changes present, skipped"
-    if run_git("merge", "--ff-only", "github/main").returncode != 0:
-        return False, "not fast-forwardable, skipped"
-    check = subprocess.run(
-        [sys.executable, "-m", "py_compile", os.path.join(REPO_DIR, "bot.py")],
-        capture_output=True,
-    )
-    if check.returncode != 0:
-        run_git("reset", "--hard", head)
-        return False, "pulled code failed to compile, rolled back"
-    return True, f"updated to {remote[:7]}"
-
-
-async def github_sync_loop():
-    while True:
-        now = datetime.now(TZ8)
-        today12 = now.replace(hour=12, minute=0, second=0, microsecond=0)
-        tomorrow00 = now.replace(hour=0, minute=0, second=0, microsecond=0) + timedelta(days=1)
-        delay = next(
-            ((t - now).total_seconds() for t in (today12, tomorrow00) if t > now),
-            12 * 3600,
-        )
-        await asyncio.sleep(delay + 5)
-        changed, detail = await sync_from_github()
-        print(f"[github-sync] {detail}", flush=True)
 
 
 async def update_fisch_status():
@@ -229,7 +180,25 @@ async def update_fisch_status():
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.allowed_installs(guilds=True, users=True)
 async def ping(interaction: discord.Interaction):
-    await interaction.response.send_message("Pong!", ephemeral=True)
+    latency_ms = round(bot.latency * 1000)
+    embed = discord.Embed(
+        description=f"Pong! 🏓 **{latency_ms} ms**",
+        color=COLOR_NATURAL,
+    )
+    await interaction.response.send_message(embed=embed, ephemeral=True)
+
+
+@bot.tree.command(name="say", description="Make the bot say a message")
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.allowed_installs(guilds=True, users=True)
+@app_commands.describe(message="The message the bot should send")
+async def say(interaction: discord.Interaction, message: str):
+    if interaction.user.id != 772721325164462101:
+        await interaction.response.send_message("You can't control me haha!")
+        return
+    await interaction.response.defer(ephemeral=True)
+    await interaction.channel.send(message)
+    await interaction.delete_original_response()
 
 
 @bot.tree.command(
@@ -256,7 +225,7 @@ async def trialschedule(interaction: discord.Interaction):
     embed = discord.Embed(
         title="Challenge Trials Schedule",
         description=f"▶ {current_trial['emoji']} **{current_trial['name']}** — Ends <t:{int(next_cycle_end.timestamp())}:R>",
-        color=discord.Color.red(),
+        color=COLOR_NATURAL,
     )
     embed.add_field(
         name=" ",
@@ -275,8 +244,8 @@ async def trialschedule(interaction: discord.Interaction):
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.allowed_installs(guilds=True, users=True)
 async def currenttrial(interaction: discord.Interaction):
-    content, embed = build_current_trial_embed()
-    await interaction.response.send_message(content=content, embed=embed)
+    embed = build_current_trial_embed()
+    await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(
@@ -288,7 +257,7 @@ async def currenttrial(interaction: discord.Interaction):
 async def strat(interaction: discord.Interaction):
     embed = discord.Embed(
         title="Strategy Guides",
-        color=discord.Color.red(),
+        color=COLOR_NATURAL,
     )
     embed.add_field(
         name="",
@@ -314,7 +283,7 @@ async def masterer(interaction: discord.Interaction):
     embed = discord.Embed(
         title="Fishing Rod List Checklist",
         description="[View Checklist](https://1drv.ms/x/c/96630b48fdd13aed/IQBzuRfZf-mtS7ILKQPeohemAbV8P-nlAnklIrRcS7bCCNg?e=Sk2NtW)",
-        color=discord.Color.red(),
+        color=COLOR_NATURAL,
     )
     await interaction.response.send_message(embed=embed)
 
@@ -328,7 +297,7 @@ async def masterer(interaction: discord.Interaction):
 async def tguide(interaction: discord.Interaction):
     embed = discord.Embed(
         title="TDS Guides",
-        color=discord.Color.red(),
+        color=COLOR_NATURAL,
     )
     embed.add_field(
         name="",
@@ -356,7 +325,10 @@ async def tguide(interaction: discord.Interaction):
 ])
 async def hostserver(interaction: discord.Interaction, server: app_commands.Choice[str]):
     server_name = server.name.split(" (")[0]
-    await interaction.response.send_message(f"Starting {server_name}...", ephemeral=True)
+    await interaction.response.send_message(
+        embed=discord.Embed(description=f"Starting {server_name}...", color=COLOR_NATURAL),
+        ephemeral=True,
+    )
     try:
         proc = subprocess.Popen(
             ["systemctl", "--user", "start", server.value],
@@ -366,16 +338,25 @@ async def hostserver(interaction: discord.Interaction, server: app_commands.Choi
         proc.wait(timeout=10)
         if proc.returncode == 0:
             await interaction.edit_original_response(
-                content=f"{server_name} started! Give it ~30 seconds to fully load before connecting."
+                embed=discord.Embed(
+                    description=f"✅ {server_name} started! Give it ~30 seconds to fully load before connecting.",
+                    color=COLOR_SUCCESS,
+                )
             )
         else:
             stderr = proc.stderr.read().decode()
             await interaction.edit_original_response(
-                content=f"Failed to start {server_name}: {stderr or 'unknown error'}"
+                embed=discord.Embed(
+                    description=f"Failed to start {server_name}: {stderr or 'unknown error'}",
+                    color=COLOR_FAIL,
+                )
             )
     except Exception as e:
         await interaction.edit_original_response(
-            content=f"Failed to start {server_name}: {e}"
+            embed=discord.Embed(
+                description=f"Failed to start {server_name}: {e}",
+                color=COLOR_FAIL,
+            )
         )
 
 
@@ -392,7 +373,10 @@ async def hostserver(interaction: discord.Interaction, server: app_commands.Choi
 ])
 async def closeserver(interaction: discord.Interaction, server: app_commands.Choice[str]):
     server_name = server.name.split(" (")[0]
-    await interaction.response.send_message(f"Stopping {server_name}...", ephemeral=True)
+    await interaction.response.send_message(
+        embed=discord.Embed(description=f"Stopping {server_name}...", color=COLOR_NATURAL),
+        ephemeral=True,
+    )
     try:
         proc = subprocess.Popen(
             ["systemctl", "--user", "stop", server.value],
@@ -402,57 +386,85 @@ async def closeserver(interaction: discord.Interaction, server: app_commands.Cho
         proc.wait(timeout=10)
         if proc.returncode == 0:
             await interaction.edit_original_response(
-                content=f"{server_name} stopped."
+                embed=discord.Embed(
+                    description=f"✅ {server_name} stopped.",
+                    color=COLOR_SUCCESS,
+                )
             )
         else:
             stderr = proc.stderr.read().decode()
             await interaction.edit_original_response(
-                content=f"Failed to stop {server_name}: {stderr or 'unknown error'}"
+                embed=discord.Embed(
+                    description=f"Failed to stop {server_name}: {stderr or 'unknown error'}",
+                    color=COLOR_FAIL,
+                )
             )
     except Exception as e:
         await interaction.edit_original_response(
-            content=f"Failed to stop {server_name}: {e}"
+            embed=discord.Embed(
+                description=f"Failed to stop {server_name}: {e}",
+                color=COLOR_FAIL,
+            )
         )
+
+
+SERVER_BOTS = {
+    1541490906484703384: "Block Survival",
+    1551994606147604630: "Other servers",
+}
 
 
 @bot.tree.command(
     name="serverstatus",
-    description="Shows Minecraft server status",
+    description="Shows which Minecraft servers are currently online",
 )
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
 @app_commands.allowed_installs(guilds=True, users=True)
 async def serverstatus(interaction: discord.Interaction):
-    def is_active(service):
-        result = subprocess.run(
-            ["systemctl", "--user", "is-active", service],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        return result.stdout.strip() == "active"
+    online = []
+    offline = []
 
-    block_survival = is_active("minecraft.service")
-    custom = is_active("minecraft-customs.service")
+    for user_id, name in SERVER_BOTS.items():
+        is_online = False
+        for guild in bot.guilds:
+            member = guild.get_member(user_id)
+            if member is not None and member.status != discord.Status.offline:
+                is_online = True
+                break
+        if is_online:
+            online.append(name)
+        else:
+            offline.append(name)
+
+    if not online:
+        await interaction.response.send_message(
+            embed=discord.Embed(
+                description="No servers are currently online.",
+                color=COLOR_FAIL,
+            )
+        )
+        return
 
     embed = discord.Embed(
         title="🖥 Minecraft Server Status",
-        color=discord.Color.green() if (block_survival or custom) else discord.Color.red(),
+        color=discord.Color.green(),
     )
     embed.add_field(
-        name="Online" if block_survival else "Offline",
-        value=f"{'✅' if block_survival else '❌'} Block Survival",
+        name="Online",
+        value="\n".join(f"✅ {name}" for name in online),
         inline=False,
     )
-    embed.add_field(
-        name="Online" if custom else "Offline",
-        value=f"{'✅' if custom else '❌'} Other servers",
-        inline=False,
-    )
+    if offline:
+        embed.add_field(
+            name="Offline",
+            value="\n".join(f"❌ {name}" for name in offline),
+            inline=False,
+        )
     await interaction.response.send_message(embed=embed)
 
 
 @bot.tree.command(
-    name="thhelp",
+    name="thhelps",
     description="Lists all Trial Helper commands",
 )
 @app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
@@ -461,7 +473,7 @@ async def thhelp(interaction: discord.Interaction):
     embed = discord.Embed(
         title="📋 Trial Helper Commands",
         description="Here's everything this bot can do:",
-        color=discord.Color.red(),
+        color=COLOR_NATURAL,
     )
     embed.add_field(
         name="⏹ Trials & Games",
@@ -486,7 +498,7 @@ async def thhelp(interaction: discord.Interaction):
         value=(
             "`/hostserver` — Start a server\n"
             "`/closeserver` — Stop a server\n"
-            "`/serverstatus` — Server status"
+            "`/serverstatus` — Check which servers are online"
         ),
         inline=False,
     )
@@ -511,14 +523,14 @@ def build_current_trial_embed():
 
     embed = discord.Embed(
         title=f"{current_trial['emoji']} {current_trial['name']}",
-        color=discord.Color.red(),
+        description=f"Ends <t:{int(next_cycle_end.timestamp())}:R>",
+        color=COLOR_NATURAL,
     )
     embed.add_field(name="Modifier", value=current_trial["modifier"], inline=True)
     embed.add_field(name="Map", value=current_trial["map"], inline=True)
     embed.add_field(name="Skills", value="Enabled", inline=True)
 
-    content = f"Ends <t:{int(next_cycle_end.timestamp())}:R>"
-    return content, embed
+    return embed
 
 
 class PinView(discord.ui.View):
@@ -529,12 +541,18 @@ class PinView(discord.ui.View):
     @discord.ui.button(label="Cancel Reminder", style=discord.ButtonStyle.danger)
     async def cancel(self, interaction: discord.Interaction, button: discord.ui.Button):
         if interaction.user.id != self.user_id:
-            await interaction.response.send_message("This isn't your reminder.", ephemeral=True)
+            await interaction.response.send_message(
+                embed=discord.Embed(description="This isn't your reminder.", color=COLOR_FAIL),
+                ephemeral=True,
+            )
             return
         task = active_pins.pop(self.user_id, None)
         if task:
             task.cancel()
-        await interaction.response.edit_message(content="Reminder cancelled.", view=None)
+        await interaction.response.edit_message(
+            embed=discord.Embed(description="Reminder cancelled.", color=COLOR_SUCCESS),
+            view=None,
+        )
 
 
 
@@ -566,7 +584,10 @@ async def pin(interaction: discord.Interaction, trial: app_commands.Choice[int])
     offset = (chosen_index - current_index) % NUM_TRIALS
     if offset == 0:
         await interaction.response.send_message(
-            content=f"{chosen_trial['emoji']} **{chosen_trial['name']}** is the current trial. Use `/currenttrial` to check it!",
+            embed=discord.Embed(
+                description=f"{chosen_trial['emoji']} **{chosen_trial['name']}** is the current trial. Use `/currenttrial` to check it!",
+                color=COLOR_NATURAL,
+            ),
             ephemeral=True,
         )
         return
@@ -579,9 +600,11 @@ async def pin(interaction: discord.Interaction, trial: app_commands.Choice[int])
         await asyncio.sleep(wait_seconds)
         try:
             await interaction.user.send(
-                f"{chosen_trial['emoji']} **{chosen_trial['name']}** starts in 15 minutes!\n"
-                f"Modifier: {chosen_trial['modifier']}\n"
-                f"Map: {chosen_trial['map']}"
+                embed=discord.Embed(
+                    title=f"{chosen_trial['emoji']} {chosen_trial['name']} starts in 15 minutes!",
+                    description=f"Modifier: {chosen_trial['modifier']}\nMap: {chosen_trial['map']}",
+                    color=COLOR_NATURAL,
+                )
             )
         except discord.Forbidden:
             pass
@@ -590,10 +613,12 @@ async def pin(interaction: discord.Interaction, trial: app_commands.Choice[int])
     active_pins[user_id] = asyncio.create_task(remind())
 
     await interaction.response.send_message(
-        content=f"You'll be reminded about **{chosen_trial['emoji']} {chosen_trial['name']}** <t:{int(reminder_time.timestamp())}:R>.",
+        embed=discord.Embed(
+            description=f"You'll be reminded about **{chosen_trial['emoji']} {chosen_trial['name']}** <t:{int(reminder_time.timestamp())}:R>.",
+            color=COLOR_SUCCESS,
+        ),
         view=PinView(user_id),
         ephemeral=True,
     )
-
 
 bot.run(os.environ["DISCORD_TOKEN"])
