@@ -13,6 +13,9 @@ COLOR_SUCCESS = discord.Color.green()
 COLOR_FAIL = discord.Color.red()
 COLOR_NATURAL = discord.Color.from_rgb(0x4D, 0xFF, 0xF0)
 
+LOG_CHANNEL_ID = 1489182661401514084
+REPO_DIR = os.path.dirname(os.path.abspath(__file__))
+
 FISCH_SEASONS = [
     {"name": "Spring", "emoji": "🌸"},
     {"name": "Summer", "emoji": "☀️"},
@@ -151,6 +154,11 @@ async def on_ready():
     synced = await bot.tree.sync()
     bot.loop.create_task(update_fisch_status())
     print(f"Logged in as {bot.user} — synced {len(synced)} commands", flush=True)
+    try:
+        channel = bot.get_channel(LOG_CHANNEL_ID) or await bot.fetch_channel(LOG_CHANNEL_ID)
+        await channel.send("bot restarted!")
+    except (discord.HTTPException, discord.Forbidden, discord.NotFound):
+        pass
 
 
 async def update_fisch_status():
@@ -498,7 +506,8 @@ async def thhelp(interaction: discord.Interaction):
         value=(
             "`/hostserver` — Start a server\n"
             "`/closeserver` — Stop a server\n"
-            "`/serverstatus` — Check which servers are online"
+            "`/serverstatus` — Check which servers are online\n"
+            "`/updatebot` — Pull latest code from GitHub & restart"
         ),
         inline=False,
     )
@@ -620,5 +629,75 @@ async def pin(interaction: discord.Interaction, trial: app_commands.Choice[int])
         view=PinView(user_id),
         ephemeral=True,
     )
+
+def run_git(*args):
+    return subprocess.run(
+        ["git", "-C", REPO_DIR, *args],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+
+@bot.tree.command(
+    name="updatebot",
+    description="Pull the latest code from GitHub and restart the bot",
+)
+@app_commands.allowed_contexts(guilds=True, dms=True, private_channels=True)
+@app_commands.allowed_installs(guilds=True, users=True)
+async def updatebot(interaction: discord.Interaction):
+    await interaction.response.defer(ephemeral=True)
+
+    fetch = run_git("fetch", "github", "main")
+    if fetch.returncode != 0:
+        await interaction.edit_original_response(
+            content="❌ Couldn't reach GitHub. Check the dydx SSH key and network."
+        )
+        return
+
+    head = run_git("rev-parse", "HEAD").stdout.strip()
+    remote = run_git("rev-parse", "github/main").stdout.strip()
+    if head == remote:
+        await interaction.edit_original_response(
+            content="✅ Already on the latest code — nothing to update."
+        )
+        return
+
+    dirty = run_git("status", "--porcelain").stdout.strip()
+    if dirty:
+        await interaction.edit_original_response(
+            content="⚠️ Local changes on dydx would be overwritten — aborting."
+        )
+        return
+
+    merge = run_git("merge", "--ff-only", "github/main")
+    if merge.returncode != 0:
+        await interaction.edit_original_response(
+            content=f"❌ Merge failed:\n{merge.stderr[:500]}"
+        )
+        return
+
+    check = subprocess.run(
+        ["python3", "-m", "py_compile", os.path.join(REPO_DIR, "bot.py")],
+        capture_output=True,
+        text=True,
+    )
+    if check.returncode != 0:
+        run_git("reset", "--hard", head)
+        await interaction.edit_original_response(
+            content=f"❌ New code fails to compile — rolled back.\n{check.stderr[:500]}"
+        )
+        return
+
+    await interaction.edit_original_response(
+        content=f"✅ Updated `{head[:7]}` → `{remote[:7]}`. Restarting bot now…"
+    )
+    asyncio.create_task(_restart_bot())
+
+
+async def _restart_bot():
+    await asyncio.sleep(3)
+    subprocess.run(["systemctl", "--user", "restart", "discord-bot"])
+
 
 bot.run(os.environ["DISCORD_TOKEN"])
