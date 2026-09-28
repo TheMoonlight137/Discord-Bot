@@ -275,7 +275,7 @@ async def strat(interaction: discord.Interaction):
         inline=False,
     )
     embed.add_field(
-    	name=""
+    	name="",
     	value="[**Trials and Tributations(Solo Trials)**](https://docs.google.com/document/d/1mAC84W6nRYf4Uz5pEHuWJUKLBXYdOtU8VYV6VopnaGk/edit?usp=drivesdk)",
         inline=False,
     )
