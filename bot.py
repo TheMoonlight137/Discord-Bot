@@ -274,7 +274,7 @@ async def strat(interaction: discord.Interaction):
         value="[**Maximum Outpost**](https://docs.google.com/document/d/1r_c7pE09-u8j56UrUuKNrVRjUk2mllZNyJZtrZ92cmg/edit?tab=t.43dlgb96w6kf)",
         inline=False,
     )
-	embed.add_field(
+    embed.add_field(
     	name=""
     	value="[**Trials and Tributations(Solo Trials)**](https://docs.google.com/document/d/1mAC84W6nRYf4Uz5pEHuWJUKLBXYdOtU8VYV6VopnaGk/edit?usp=drivesdk)",
         inline=False,
