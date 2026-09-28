@@ -6,13 +6,10 @@ from datetime import datetime, timezone, timedelta
 import asyncio
 import subprocess
 import os
-
 load_dotenv()
-
 COLOR_SUCCESS = discord.Color.green()
 COLOR_FAIL = discord.Color.red()
 COLOR_NATURAL = discord.Color.from_rgb(0x4D, 0xFF, 0xF0)
-
 LOG_CHANNEL_ID = 1489182661401514084
 REPO_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -277,7 +274,11 @@ async def strat(interaction: discord.Interaction):
         value="[**Maximum Outpost**](https://docs.google.com/document/d/1r_c7pE09-u8j56UrUuKNrVRjUk2mllZNyJZtrZ92cmg/edit?tab=t.43dlgb96w6kf)",
         inline=False,
     )
-
+	embed.add_field(
+    	name=""
+    	value="[**Trials and Tributations(Solo Trials)**](https://docs.google.com/document/d/1mAC84W6nRYf4Uz5pEHuWJUKLBXYdOtU8VYV6VopnaGk/edit?usp=drivesdk)",
+        inline=False,
+    )
     await interaction.response.send_message(embed=embed)
 
 
