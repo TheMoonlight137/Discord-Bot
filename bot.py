@@ -11,6 +11,7 @@ COLOR_SUCCESS = discord.Color.green()
 COLOR_FAIL = discord.Color.red()
 COLOR_NATURAL = discord.Color.from_rgb(0x4D, 0xFF, 0xF0)
 LOG_CHANNEL_ID = 1489182661401514084
+OWNER_ID = 1211260765428912210  # FallenBooster - only the bot owner may use /say
 REPO_DIR = os.path.dirname(os.path.abspath(__file__))
 
 FISCH_SEASONS = [
@@ -198,7 +199,7 @@ async def ping(interaction: discord.Interaction):
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.describe(message="The message the bot should send")
 async def say(interaction: discord.Interaction, message: str):
-    if interaction.user.id != 772721325164462101:
+    if interaction.user.id != OWNER_ID:
         await interaction.response.send_message("You can't control me haha!")
         return
     await interaction.response.defer(ephemeral=True)
