@@ -11,7 +11,10 @@ COLOR_SUCCESS = discord.Color.green()
 COLOR_FAIL = discord.Color.red()
 COLOR_NATURAL = discord.Color.from_rgb(0x4D, 0xFF, 0xF0)
 LOG_CHANNEL_ID = 1489182661401514084
-OWNER_ID = 1211260765428912210  # FallenBooster - only the bot owner may use /say
+OWNER_ID = 1211260765428912210  # FallenBooster
+KINGMINE_ID = 772721325164462101  # King mine
+SERVER_ADMIN_IDS = (OWNER_ID, KINGMINE_ID)  # may start/stop Minecraft servers
+DENIED_MSG = "Heh...you thought i wouldnt care about this..."
 REPO_DIR = os.path.dirname(os.path.abspath(__file__))
 
 FISCH_SEASONS = [
@@ -200,7 +203,7 @@ async def ping(interaction: discord.Interaction):
 @app_commands.describe(message="The message the bot should send")
 async def say(interaction: discord.Interaction, message: str):
     if interaction.user.id != OWNER_ID:
-        await interaction.response.send_message("Heh...you thought i wouldnt care about this...")
+        await interaction.response.send_message(DENIED_MSG)
         return
     await interaction.response.defer(ephemeral=True)
     await interaction.channel.send(message)
@@ -334,6 +337,9 @@ async def tguide(interaction: discord.Interaction):
     app_commands.Choice(name="Customs (NeoForge)", value="minecraft-customs.service"),
 ])
 async def hostserver(interaction: discord.Interaction, server: app_commands.Choice[str]):
+    if interaction.user.id not in SERVER_ADMIN_IDS:
+        await interaction.response.send_message(DENIED_MSG, ephemeral=True)
+        return
     server_name = server.name.split(" (")[0]
     await interaction.response.send_message(
         embed=discord.Embed(description=f"Starting {server_name}...", color=COLOR_NATURAL),
@@ -382,6 +388,9 @@ async def hostserver(interaction: discord.Interaction, server: app_commands.Choi
     app_commands.Choice(name="Customs (NeoForge)", value="minecraft-customs.service"),
 ])
 async def closeserver(interaction: discord.Interaction, server: app_commands.Choice[str]):
+    if interaction.user.id not in SERVER_ADMIN_IDS:
+        await interaction.response.send_message(DENIED_MSG, ephemeral=True)
+        return
     server_name = server.name.split(" (")[0]
     await interaction.response.send_message(
         embed=discord.Embed(description=f"Stopping {server_name}...", color=COLOR_NATURAL),
