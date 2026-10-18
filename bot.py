@@ -206,7 +206,19 @@ async def say(interaction: discord.Interaction, message: str):
         await interaction.response.send_message(DENIED_MSG)
         return
     await interaction.response.defer(ephemeral=True)
-    await interaction.channel.send(message)
+    try:
+        await interaction.channel.send(message)
+    except discord.Forbidden:
+        print(f"/say forbidden in channel {getattr(interaction.channel, 'id', '?')}", flush=True)
+        await interaction.edit_original_response(
+            content="I can't post in this channel — I don't have access here. "
+                    "Try a normal channel in the server where I can see and send messages."
+        )
+        return
+    except Exception as e:
+        print(f"/say failed: {e!r}", flush=True)
+        await interaction.edit_original_response(content=f"Couldn't send that: {e}")
+        return
     await interaction.delete_original_response()
 
 
