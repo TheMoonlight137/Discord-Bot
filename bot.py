@@ -200,7 +200,7 @@ async def ping(interaction: discord.Interaction):
 @app_commands.describe(message="The message the bot should send")
 async def say(interaction: discord.Interaction, message: str):
     if interaction.user.id != OWNER_ID:
-        await interaction.response.send_message("You can't control me haha!")
+        await interaction.response.send_message("Heh...you thought i wouldnt care about this...")
         return
     await interaction.response.defer(ephemeral=True)
     await interaction.channel.send(message)
