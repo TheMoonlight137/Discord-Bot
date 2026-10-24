@@ -184,7 +184,9 @@ class Session:
             store.db.close()
 
     # --- question flow ----------------------------------------------------
-    def next_question(self, topics: list[str] | None = None) -> dict:
+    def next_question(self, topics: list[str] | None = None,
+                      verify: bool | None = None,
+                      defer: bool = False) -> dict:
         with self.lock:
             if self.pending is not None:
                 return self._question_payload()
@@ -195,18 +197,20 @@ class Session:
             else:
                 llm = CFG["llm"]
             scope = topics or self.stored_topics()
+            should_verify = CFG["verify"] if verify is None else verify
             store = self._store()
             try:
                 qid, q, source_note, warning = T.next_question(
-                    llm, store, scope, self.rng, CFG["verify"],
+                    llm, store, scope, self.rng, should_verify,
                     challenge=self.streak_boost,
                 )
+                deferred = bool(q.get("deferred_verify")) or defer
                 store.set("pending_qid", qid)
                 store.set("pending_warning", warning or "")
                 store.set("pending_source", source_note or "")
                 store.set("pending_confirm", "")
                 store.set("pending_user_answer", "")
-                store.set("pending_deferred", "1" if q.get("deferred_verify") else "")
+                store.set("pending_deferred", "1" if deferred else "")
             finally:
                 store.db.close()
             self.pending = {
@@ -216,7 +220,7 @@ class Session:
                 "source_note": source_note,
                 "needs_confirmation": False,
                 "user_answer": None,
-                "deferred": bool(q.get("deferred_verify")),
+                "deferred": deferred,
             }
             return self._question_payload()
 

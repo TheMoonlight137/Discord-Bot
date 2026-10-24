@@ -315,6 +315,8 @@ class Party:
         self.key = key
         self.lock = threading.Lock()
         self.session = core.Session(key, PARTY_DIR / f"{key}.db")
+        self._verified_qid: int | None = None
+        self._verified_ok = False
         self._ensure_tables()
 
     def _store(self) -> T.Store:
@@ -421,6 +423,15 @@ class Party:
             if pending is None or pending["qid"] != qid:
                 return {"closed": True}
 
+            verified = self._verify_pending()
+            if verified is None:
+                return {"verification_error": True}
+            if not verified:
+                self.session.discard()
+                self._verified_qid = None
+                self._verified_ok = False
+                return {"invalid": True}
+
             question = pending["q"]
             correct, note, details = T.grade_parts(question, answers)
             self.record_attempt(user_id, correct)
@@ -431,12 +442,50 @@ class Party:
             result = self.session._finish(True, answers, note, details)
             return {"winner": result, "question": question}
 
+    def _verify_pending(self) -> bool | None:
+        """Check the current party answer key, caching the result.
+
+        Returns None if the verification call itself failed, so callers can
+        leave the question open instead of penalising anyone.
+        """
+        pending = self.session.pending
+        if pending is None:
+            return False
+        qid = pending["qid"]
+        if self._verified_qid == qid:
+            return self._verified_ok
+
+        llm = core.CFG.get("llm")
+        if not (core.CFG.get("verify") and llm is not None):
+            self._verified_qid = qid
+            self._verified_ok = True
+            return True
+
+        try:
+            ok, _off = T.verify_question(llm, pending["q"])
+        except (T.LLMError, ValueError):
+            return None
+
+        self._verified_qid = qid
+        self._verified_ok = bool(ok)
+        return self._verified_ok
+
     def reveal(self):
         """Close the question as unanswered (a gentle group rating drop)."""
         with self.lock:
             pending = self.session.pending
             if pending is None:
                 return None
+
+            verified = self._verify_pending()
+            if verified is None:
+                return {"verification_error": True}
+            if not verified:
+                self.session.discard()
+                self._verified_qid = None
+                self._verified_ok = False
+                return {"invalid": True}
+
             question = pending["q"]
             self.session._finish(
                 False, ["revealed"], "no one answered correctly", []
@@ -445,21 +494,13 @@ class Party:
 
     def advance(self) -> dict:
         with self.lock:
-            llm = core.CFG.get("llm")
-            verify = bool(core.CFG.get("verify")) and llm is not None
-            for _ in range(3):
-                payload = self.session.next_question(self.topics())
-                if not verify:
-                    return payload
-                question = self.session.pending["q"]
-                try:
-                    ok, _off = T.verify_question(llm, question)
-                except (T.LLMError, ValueError):
-                    ok = False
-                if ok:
-                    return payload
-                self.session.discard()
-            raise T.LLMError("couldn't generate an independently verified question")
+            self._verified_qid = None
+            self._verified_ok = False
+            # Party questions are checked on the first submission/reveal, not
+            # before posting, so a valid question appears immediately.
+            return self.session.next_question(
+                self.topics(), verify=False, defer=True
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -692,6 +733,40 @@ class PartyAnswerModal(discord.ui.Modal):
                 "Not quite — keep trying. The question is still open.", ephemeral=True
             )
             return
+        if outcome.get("verification_error"):
+            await interaction.followup.send(
+                "I couldn't check this question right now. No score change — "
+                "please submit again.",
+                ephemeral=True,
+            )
+            return
+        if outcome.get("invalid"):
+            channel = interaction.channel
+            if channel is None:
+                await interaction.followup.send(
+                    "That question failed verification, so it was voided. "
+                    "No score change.",
+                    ephemeral=True,
+                )
+                return
+            try:
+                await channel.send(
+                    "⚠️ That question could not be verified, so it was voided. "
+                    "No one is penalised — posting a fresh question."
+                )
+            except discord.Forbidden:
+                pass
+            try:
+                await _finish_and_next(channel, party)
+            except Exception as exc:  # noqa: BLE001
+                traceback.print_exc()
+                await interaction.followup.send(embed=error_embed(exc),
+                                                ephemeral=True)
+                return
+            await interaction.followup.send(
+                "Question replaced with a fresh one.", ephemeral=True
+            )
+            return
 
         winner = outcome["winner"]
         answer = _answer_text_from_parts(winner.get("parts") or [])
@@ -775,6 +850,31 @@ class PartyView(discord.ui.View):
 
         await interaction.response.defer()
         question = await asyncio.to_thread(party.reveal)
+        if isinstance(question, dict) and question.get("verification_error"):
+            await interaction.edit_original_response(
+                content="I couldn't check this question right now. No score "
+                        "change — please try revealing it again.",
+                embed=None,
+                view=None,
+            )
+            return
+        if isinstance(question, dict) and question.get("invalid"):
+            try:
+                await interaction.edit_original_response(
+                    content="⚠️ That question could not be verified, so it was "
+                            "voided. No one is penalised — posting a fresh one.",
+                    embed=None,
+                    view=None,
+                )
+            except discord.HTTPException:
+                pass
+            try:
+                await _finish_and_next(interaction.channel, party)
+            except Exception as exc:  # noqa: BLE001
+                traceback.print_exc()
+                await interaction.edit_original_response(embed=error_embed(exc),
+                                                         view=None)
+            return
         if question is not None:
             answer = _answer_text_from_parts(T.question_parts(question))
             try:
