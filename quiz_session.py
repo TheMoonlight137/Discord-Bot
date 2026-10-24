@@ -23,12 +23,6 @@ CFG: dict = {}
 SESSIONS: dict[str, "Session"] = {}
 SESSIONS_LOCK = threading.Lock()
 
-# 2025 Physics cutoffs (Level 2 40%, 3 48%, 4 63%, 5 79%, 5* 87%, 5** 93%)
-# mapped onto the seven-question placement test. One question is asked per
-# level, so the boundaries are deliberately coarse; the adaptive Elo system
-# refines the estimate afterwards.
-PLACEMENT_LEVEL_BY_CORRECT = (1, 1, 2, 3, 4, 5, 6, 7)
-
 
 def load_env_file(path: str) -> None:
     p = Path(path).expanduser()
@@ -114,18 +108,8 @@ class Session:
 
     def _clear_pending(self, store: T.Store) -> None:
         for key in ("pending_qid", "pending_warning", "pending_source",
-                    "pending_confirm", "pending_user_answer", "pending_deferred",
-                    "pending_placement"):
+                    "pending_confirm", "pending_user_answer", "pending_deferred"):
             store.set(key, "")
-
-    def _next_placement_band(self, store: T.Store) -> int | None:
-        """Return the next placement level, or None if placement is done."""
-        if store.get("placement_done") == "1" or store.get_int("attempts") > 0:
-            return None
-        index = store.get_int("placement_index")
-        if index >= T.MAX_LEVEL:
-            return None
-        return index + 1
 
     def _restore_pending(self) -> None:
         """Reload a question that was displayed before a restart."""
@@ -195,7 +179,6 @@ class Session:
                 "needs_confirmation": needs_confirmation,
                 "user_answer": user_answer,
                 "deferred": store.get("pending_deferred") == "1",
-                "placement_band": store.get_int("pending_placement", 0) or None,
             }
         finally:
             store.db.close()
@@ -211,15 +194,12 @@ class Session:
                 raise T.LLMError(CFG["llm_error"] or "no model configured")
             else:
                 llm = CFG["llm"]
+            scope = topics or self.stored_topics()
             store = self._store()
             try:
-                placement_band = self._next_placement_band(store)
-                scope = (list(T.ALL_TOPICS) if placement_band is not None
-                         else (topics or self.stored_topics()))
                 qid, q, source_note, warning = T.next_question(
                     llm, store, scope, self.rng, CFG["verify"],
-                    challenge=self.streak_boost and placement_band is None,
-                    forced_level=placement_band,
+                    challenge=self.streak_boost,
                 )
                 store.set("pending_qid", qid)
                 store.set("pending_warning", warning or "")
@@ -227,7 +207,6 @@ class Session:
                 store.set("pending_confirm", "")
                 store.set("pending_user_answer", "")
                 store.set("pending_deferred", "1" if q.get("deferred_verify") else "")
-                store.set("pending_placement", placement_band or "")
             finally:
                 store.db.close()
             self.pending = {
@@ -238,7 +217,6 @@ class Session:
                 "needs_confirmation": False,
                 "user_answer": None,
                 "deferred": bool(q.get("deferred_verify")),
-                "placement_band": placement_band,
             }
             return self._question_payload()
 
@@ -254,9 +232,6 @@ class Session:
             "question": q["question"],
             "challenge": bool(q.get("challenge")),
             "challenge_bands": int(q.get("challenge_bands") or 0),
-            "placement": bool(self.pending.get("placement_band")),
-            "placement_band": self.pending.get("placement_band"),
-            "placement_total": T.MAX_LEVEL,
             "warning": self.pending["warning"],
             "source_note": self.pending["source_note"],
             "needs_confirmation": bool(self.pending.get("needs_confirmation")),
@@ -348,11 +323,6 @@ class Session:
                     True, pending["user_answer"],
                     "counted as correct on your confirmation", part_details,
                 )
-            if pending.get("placement_band"):
-                return self._finish_placement(
-                    False, pending.get("user_answer") or ["discarded"],
-                    "discarded during placement", [],
-                )
             store = self._store()
             try:
                 store.delete_question(pending["qid"])
@@ -362,73 +332,9 @@ class Session:
             self.pending = None
             return {"discarded": True, "stats": self._stats_payload()}
 
-    def _finish_placement(self, correct: bool, user_answers: list[str],
-                          note: str | None,
-                          part_details: list[dict] | None = None) -> dict:
-        assert self.pending is not None
-        q = self.pending["q"]
-        answered_band = int(self.pending["placement_band"])
-        user_answer_str = " | ".join(user_answers)
-        store = self._store()
-        try:
-            raw = store.get_json("placement_results", [])
-            results = raw if isinstance(raw, list) else []
-            results.append({"band": answered_band, "correct": bool(correct)})
-            store.set("placement_results", json.dumps(results))
-            store.set("placement_index", len(results))
-
-            complete = len(results) >= T.MAX_LEVEL
-            final_band = None
-            if complete:
-                count_correct = sum(
-                    1 for item in results
-                    if isinstance(item, dict) and item.get("correct")
-                )
-                final_band = PLACEMENT_LEVEL_BY_CORRECT[
-                    min(count_correct, T.MAX_LEVEL)
-                ]
-                final_rating = T.elo_of_level(final_band) - T.TARGET_OFFSET
-                for topic in T.ALL_TOPICS:
-                    store.set_rating(topic, final_rating)
-                store.set("placement_done", "1")
-                store.set("placement_band", final_band)
-                store.set("placement_rating", final_rating)
-                store.set("placement_index", len(results))
-                store.set("streak", 0)
-                store.set("best_streak", 0)
-
-            self._clear_pending(store)
-            stats = self._stats_payload(store)
-        finally:
-            store.db.close()
-
-        self.pending = None
-        return {
-            "placement": True,
-            "placement_complete": complete,
-            "placement_index": len(results),
-            "placement_total": T.MAX_LEVEL,
-            "placement_band": final_band if complete else answered_band,
-            "placement_answered_band": answered_band,
-            "correct": correct,
-            "your_answer": (user_answers[0] if len(user_answers) == 1
-                            else user_answer_str),
-            "your_answers": user_answers,
-            "parts": part_details or [],
-            "expected": (part_details[0]["expected"] if part_details
-                         else T.answer_string(q)),
-            "solution": q.get("solution") or "",
-            "note": note or "",
-            "stats": stats,
-        }
-
     def _finish(self, correct: bool, user_answers: list[str], note: str | None,
                 part_details: list[dict] | None = None) -> dict:
         assert self.pending is not None
-        if self.pending.get("placement_band"):
-            return self._finish_placement(
-                correct, user_answers, note, part_details
-            )
         q = self.pending["q"]
         topic = q["topic"]
         user_answer_str = " | ".join(user_answers)
@@ -499,10 +405,6 @@ class Session:
         with self.lock:
             if self.pending is None:
                 raise NoQuestionError("there is no active question")
-            if self.pending.get("placement_band"):
-                return self._finish_placement(
-                    False, ["skipped"], "skipped during placement", []
-                )
             store = self._store()
             try:
                 store.set_reask(
@@ -518,10 +420,6 @@ class Session:
         with self.lock:
             if self.pending is None:
                 raise NoQuestionError("there is no active question")
-            if self.pending.get("placement_band"):
-                return self._finish_placement(
-                    False, ["discarded"], "discarded during placement", []
-                )
             store = self._store()
             try:
                 store.delete_question(self.pending["qid"])
@@ -566,7 +464,6 @@ class Session:
                 "streak": store.get_int("streak"),
                 "best_streak": store.get_int("best_streak"),
                 "questions": store.count_questions(),
-                "placement_done": store.get("placement_done") == "1",
             }
         finally:
             if own:

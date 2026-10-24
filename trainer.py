@@ -1194,8 +1194,7 @@ IRRATIONAL_STYLE = (
 
 
 def next_question(llm: LLM | None, store: Store, topics: list[str],
-                  rng: random.Random, verify: bool, challenge: bool = False,
-                  forced_level: int | None = None):
+                  rng: random.Random, verify: bool, challenge: bool = False):
     """Generate (or revisit) the next question. Returns (qid, q, source_note, warning)."""
     restored = store.get_json("restore_question")
     if restored:
@@ -1208,7 +1207,7 @@ def next_question(llm: LLM | None, store: Store, topics: list[str],
         return qid, restored, "restored after accidental discard", None
 
     asked_next = store.get_int("asked") + 1
-    due = store.due_reask(asked_next, topics) if forced_level is None else None
+    due = store.due_reask(asked_next, topics)
     variant_of = dict(due) if due else None
     source_note = "variant of one you missed" if due else None
 
@@ -1220,16 +1219,13 @@ def next_question(llm: LLM | None, store: Store, topics: list[str],
     else:
         topic = pick_topic(store, topics, rng)
         subtopic = rng.choice(SYLLABUS[topic])
-        if forced_level is not None:
-            level = int(clamp(forced_level, 1, MAX_LEVEL))
-        else:
-            level = level_of_elo(target_difficulty(store.rating(topic), rng))
-            if (challenge and level < MAX_LEVEL
-                    and rng.random() < CHALLENGE_CHANCE):
-                spike = rng.choice((1, 2))
-                new_level = min(MAX_LEVEL, level + spike)
-                challenge_bands = new_level - level
-                level = new_level
+        level = level_of_elo(target_difficulty(store.rating(topic), rng))
+        if (challenge and level < MAX_LEVEL
+                and rng.random() < CHALLENGE_CHANCE):
+            spike = rng.choice((1, 2))
+            new_level = min(MAX_LEVEL, level + spike)
+            challenge_bands = new_level - level
+            level = new_level
 
     warn = None
     deferred = False

@@ -164,20 +164,10 @@ def question_embed(payload: dict, party: bool = False) -> discord.Embed:
         title = "⚡ Challenge · " + title
     if party:
         title = "🎉 Party · " + title
-    if payload.get("placement"):
-        title = "🧭 Placement · " + title
     embed = discord.Embed(title=title,
                           description=_clip(payload["question"], 4000),
                           color=ACCENT)
     embed.add_field(name="Topic", value=_clip(payload["topic"], 100), inline=True)
-    if payload.get("placement"):
-        level = int(payload.get("placement_band") or payload["level"])
-        embed.add_field(
-            name="🧭 Initial placement",
-            value=f"Question {level} of {payload.get('placement_total', 7)} — "
-                  "one question from each level across all topics sets your starting level.",
-            inline=False,
-        )
     if payload.get("challenge"):
         levels = int(payload.get("challenge_bands") or 0)
         embed.add_field(
@@ -246,55 +236,6 @@ def result_embed(result: dict) -> discord.Embed:
     return embed
 
 
-def placement_result_embed(result: dict) -> discord.Embed:
-    correct = bool(result.get("correct"))
-    complete = bool(result.get("placement_complete"))
-    index = int(result.get("placement_index") or 0)
-    total = int(result.get("placement_total") or 7)
-    if complete:
-        title = "🧭 Placement complete"
-        color = ACCENT
-    else:
-        title = f"🧭 Placement · {index}/{total}"
-        color = discord.Color.green() if correct else discord.Color.red()
-    embed = discord.Embed(title=title, color=color)
-    for part in result.get("parts") or []:
-        label = part.get("label") or "Answer"
-        if part.get("self_check"):
-            value = (f"Your answer: {part.get('your_answer', '—')}\n"
-                     f"Model answer: {part.get('expected', '—')}\n"
-                     f"Self-check — not scored.")
-        else:
-            value = (f"Your answer: {part.get('your_answer', '—')}\n"
-                     f"Expected: {part.get('expected', '—')}")
-        embed.add_field(name=_clip(label, 100), value=_clip(value), inline=False)
-    if not result.get("parts") and result.get("note"):
-        embed.add_field(name="Note", value=_clip(result["note"]), inline=False)
-    if result.get("solution"):
-        _add_long_field(embed, "Solution", result["solution"])
-    if complete:
-        level = int(result.get("placement_band") or 1)
-        embed.add_field(
-            name="Starting level",
-            value=f"Level {level}/7 · HKDSE {T.dse_grade_label(level)}-style "
-                  "question difficulty. This is a starting point, not a predicted grade.",
-            inline=False,
-        )
-        embed.set_footer(text="Placement complete — start training when ready.")
-    else:
-        embed.set_footer(
-            text=f"Placement {index}/{total} · level "
-                 f"{result.get('placement_answered_band')} question checked"
-        )
-    return embed
-
-
-def answer_embed(result: dict) -> discord.Embed:
-    if result.get("placement"):
-        return placement_result_embed(result)
-    return result_embed(result)
-
-
 def stats_embed(stats: dict) -> discord.Embed:
     overall = stats["overall"]
 
@@ -311,8 +252,6 @@ def stats_embed(stats: dict) -> discord.Embed:
                      f"· level {row['band']} · {acc(row)}")
     lines += ["", f"Streak {stats['streak']} · best {stats['best_streak']} "
                   f"· {stats['questions']} questions generated"]
-    if not stats.get("placement_done", True):
-        lines += ["", "Initial placement not completed — use `/physics` first."]
     return discord.Embed(title="Your HKDSE Physics progress",
                          description="\n".join(lines), color=ACCENT)
 
@@ -956,25 +895,18 @@ class AnswerModal(discord.ui.Modal):
                 ephemeral=True,
             )
         else:
-            label = ("Start training" if result.get("placement_complete")
-                     else "Next question")
             await interaction.followup.send(
-                embed=answer_embed(result),
-                view=NextView(self.user_id, label),
+                embed=result_embed(result),
+                view=NextView(self.user_id),
                 ephemeral=True,
             )
 
 
 class QuestionView(discord.ui.View):
-    def __init__(self, user_id: int, parts: list[dict],
-                 placement: bool = False):
+    def __init__(self, user_id: int, parts: list[dict]):
         super().__init__(timeout=900)
         self.user_id = user_id
         self.parts = parts
-        if placement:
-            for child in self.children:
-                if getattr(child, "label", "") in ("Hint", "Skip", "Discard"):
-                    child.disabled = True
 
     @discord.ui.button(label="Answer", style=discord.ButtonStyle.primary)
     async def answer(self, interaction: discord.Interaction,
@@ -1008,22 +940,13 @@ class QuestionView(discord.ui.View):
         session = _session(self.user_id)
         try:
             if mode == "skip":
-                result = await asyncio.to_thread(session.skip)
+                await asyncio.to_thread(session.skip)
             else:
-                result = await asyncio.to_thread(session.discard)
-            if result.get("placement"):
-                label = ("Start training" if result.get("placement_complete")
-                         else "Next question")
-                await interaction.edit_original_response(
-                    embed=placement_result_embed(result),
-                    view=NextView(self.user_id, label),
-                )
-                return
+                await asyncio.to_thread(session.discard)
             payload = await asyncio.to_thread(session.next_question)
             await interaction.edit_original_response(
                 embed=question_embed(payload),
-                view=QuestionView(self.user_id, payload["parts"],
-                                  placement=bool(payload.get("placement"))),
+                view=QuestionView(self.user_id, payload["parts"]),
             )
         except Exception as exc:  # noqa: BLE001
             await interaction.edit_original_response(embed=error_embed(exc),
@@ -1031,10 +954,9 @@ class QuestionView(discord.ui.View):
 
 
 class NextView(discord.ui.View):
-    def __init__(self, user_id: int, label: str = "Next question"):
+    def __init__(self, user_id: int):
         super().__init__(timeout=900)
         self.user_id = user_id
-        self.next_question.label = label
 
     @discord.ui.button(label="Next question", style=discord.ButtonStyle.primary)
     async def next_question(self, interaction: discord.Interaction,
@@ -1045,8 +967,7 @@ class NextView(discord.ui.View):
             payload = await asyncio.to_thread(session.next_question)
             await interaction.edit_original_response(
                 embed=question_embed(payload),
-                view=QuestionView(self.user_id, payload["parts"],
-                                  placement=bool(payload.get("placement"))),
+                view=QuestionView(self.user_id, payload["parts"]),
             )
         except Exception as exc:  # noqa: BLE001
             await interaction.edit_original_response(embed=error_embed(exc),
@@ -1066,11 +987,9 @@ class ConfirmView(discord.ui.View):
         session = _session(self.user_id)
         try:
             result = await asyncio.to_thread(session.confirm, True)
-            label = ("Start training" if result.get("placement_complete")
-                     else "Next question")
             await interaction.edit_original_response(
-                embed=answer_embed(result),
-                view=NextView(self.user_id, label),
+                embed=result_embed(result),
+                view=NextView(self.user_id),
             )
         except Exception as exc:  # noqa: BLE001
             await interaction.edit_original_response(embed=error_embed(exc),
@@ -1082,20 +1001,11 @@ class ConfirmView(discord.ui.View):
         await interaction.response.defer()
         session = _session(self.user_id)
         try:
-            result = await asyncio.to_thread(session.confirm, False)
-            if result.get("placement"):
-                label = ("Start training" if result.get("placement_complete")
-                         else "Next question")
-                await interaction.edit_original_response(
-                    embed=placement_result_embed(result),
-                    view=NextView(self.user_id, label),
-                )
-                return
+            await asyncio.to_thread(session.confirm, False)
             payload = await asyncio.to_thread(session.next_question)
             await interaction.edit_original_response(
                 embed=question_embed(payload),
-                view=QuestionView(self.user_id, payload["parts"],
-                                  placement=bool(payload.get("placement"))),
+                view=QuestionView(self.user_id, payload["parts"]),
             )
         except Exception as exc:  # noqa: BLE001
             await interaction.edit_original_response(embed=error_embed(exc),
@@ -1126,7 +1036,6 @@ def setup(bot: commands.Bot) -> None:
         session.set_topics(scope)
         await asyncio.to_thread(session.set_streak_boost, True)
         if (session.pending is not None
-                and not session.pending.get("placement_band")
                 and session.pending["q"]["topic"] not in scope):
             await asyncio.to_thread(session.discard)
         try:
@@ -1136,8 +1045,7 @@ def setup(bot: commands.Bot) -> None:
             return
         await interaction.followup.send(
             embed=question_embed(payload),
-            view=QuestionView(interaction.user.id, payload["parts"],
-                              placement=bool(payload.get("placement"))),
+            view=QuestionView(interaction.user.id, payload["parts"]),
             ephemeral=True,
         )
 
