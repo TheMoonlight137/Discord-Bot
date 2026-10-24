@@ -221,6 +221,7 @@ REASK_GAP = 8             # missed questions return after ~8 more questions
 LONG_QUESTION_CHARS = 240 # verify these only after the user answers
 STREAK_GAIN_FACTOR = 2.0  # solo Elo gain doubles per consecutive correct answer
 STREAK_GAIN_CAP = 4.0     # ...until this cap
+CHALLENGE_CHANCE = 0.12   # solo-only chance of a random higher-band question
 # Correct-answer gain multiplier by the player's current band. Climbing gets
 # slower at higher bands, like a climbing-speed decay in an arcade ladder.
 BAND_GAIN_FACTORS = (1.00, 0.95, 0.90, 0.80, 0.70, 0.60, 0.50)
@@ -456,6 +457,8 @@ CREATE TABLE IF NOT EXISTS questions (
     hint          TEXT,
     solution      TEXT,
     parts_json    TEXT,
+    challenge     INTEGER NOT NULL DEFAULT 0,
+    challenge_bands INTEGER NOT NULL DEFAULT 0,
     source        TEXT DEFAULT 'generated',
     next_ask_at   INTEGER,
     created_at    TEXT NOT NULL
@@ -482,6 +485,14 @@ class Store:
             self.db.execute("ALTER TABLE questions ADD COLUMN subtopic TEXT NOT NULL DEFAULT ''")
         if "parts_json" not in columns:
             self.db.execute("ALTER TABLE questions ADD COLUMN parts_json TEXT")
+        if "challenge" not in columns:
+            self.db.execute(
+                "ALTER TABLE questions ADD COLUMN challenge INTEGER NOT NULL DEFAULT 0"
+            )
+        if "challenge_bands" not in columns:
+            self.db.execute(
+                "ALTER TABLE questions ADD COLUMN challenge_bands INTEGER NOT NULL DEFAULT 0"
+            )
         self.db.commit()
 
     # --- key/value state --------------------------------------------------
@@ -531,12 +542,13 @@ class Store:
     def save_question(self, q: dict) -> int:
         cur = self.db.execute(
             "INSERT INTO questions(topic, subtopic, level, question, answer, answer_format, "
-            "unit, hint, solution, parts_json, source, created_at) "
-            "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+            "unit, hint, solution, parts_json, challenge, challenge_bands, source, "
+            "created_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (q["topic"], q.get("subtopic", ""), q["level"], q["question"], q["answer"],
              q.get("answer_format", "short_text"), q.get("unit"),
              q.get("hint"), q.get("solution"),
              json.dumps(q.get("parts") or [], ensure_ascii=False),
+             int(bool(q.get("challenge"))), int(q.get("challenge_bands") or 0),
              q.get("source", "generated"), now_iso()),
         )
         self.db.commit()
@@ -1182,11 +1194,13 @@ IRRATIONAL_STYLE = (
 
 
 def next_question(llm: LLM | None, store: Store, topics: list[str],
-                  rng: random.Random, verify: bool):
+                  rng: random.Random, verify: bool, challenge: bool = False):
     """Generate (or revisit) the next question. Returns (qid, q, source_note, warning)."""
     restored = store.get_json("restore_question")
     if restored:
         store.set("restore_question", "")
+        restored.setdefault("challenge", False)
+        restored.setdefault("challenge_bands", 0)
         restored["deferred_verify"] = is_long_question(restored)
         qid = store.save_question(restored)
         store.bump_asked()
@@ -1197,6 +1211,7 @@ def next_question(llm: LLM | None, store: Store, topics: list[str],
     variant_of = dict(due) if due else None
     source_note = "variant of one you missed" if due else None
 
+    challenge_bands = 0
     if due:
         topic = variant_of["topic"]
         subtopic = variant_of.get("subtopic") or rng.choice(SYLLABUS[topic])
@@ -1205,6 +1220,12 @@ def next_question(llm: LLM | None, store: Store, topics: list[str],
         topic = pick_topic(store, topics, rng)
         subtopic = rng.choice(SYLLABUS[topic])
         level = level_of_elo(target_difficulty(store.rating(topic), rng))
+        if (challenge and level < MAX_LEVEL
+                and rng.random() < CHALLENGE_CHANCE):
+            spike = rng.choice((1, 2))
+            new_level = min(MAX_LEVEL, level + spike)
+            challenge_bands = new_level - level
+            level = new_level
 
     warn = None
     deferred = False
@@ -1244,6 +1265,8 @@ def next_question(llm: LLM | None, store: Store, topics: list[str],
             warn = f"could not build a variant ({e}); showing the original"
 
     q["deferred_verify"] = bool(deferred)
+    q["challenge"] = challenge_bands > 0
+    q["challenge_bands"] = challenge_bands
 
     if due:
         store.clear_reask(due["id"])
@@ -1257,6 +1280,8 @@ def show_question(q: dict, source_note: str | None, warning: str | None) -> None
     print(dim("─" * 74))
     meta = (f"{q['topic']} · practice band {q['level']}/7 "
             f"(HKDSE {dse_grade_label(q['level'])}-style) · {level_descriptor(q['level'])}")
+    if q.get("challenge"):
+        meta = "⚡ CHALLENGE · " + meta
     if source_note:
         meta += f" · {source_note}"
     print(bold(meta))
@@ -1676,7 +1701,7 @@ def main() -> None:
     try:
         while True:
             qid, q, source_note, warning = next_question(
-                llm, store, topics, rng, verify
+                llm, store, topics, rng, verify, challenge=True
             )
             show_question(q, source_note, warning)
             action, payload = ask_user(q, store, topics)

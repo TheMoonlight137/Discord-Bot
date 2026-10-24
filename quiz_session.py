@@ -134,6 +134,8 @@ class Session:
                 "unit": row["unit"],
                 "hint": row["hint"],
                 "solution": row["solution"],
+                "challenge": bool(row["challenge"]),
+                "challenge_bands": int(row["challenge_bands"] or 0),
             }
             parts = []
             try:
@@ -196,7 +198,8 @@ class Session:
             store = self._store()
             try:
                 qid, q, source_note, warning = T.next_question(
-                    llm, store, scope, self.rng, CFG["verify"]
+                    llm, store, scope, self.rng, CFG["verify"],
+                    challenge=self.streak_boost,
                 )
                 store.set("pending_qid", qid)
                 store.set("pending_warning", warning or "")
@@ -227,6 +230,8 @@ class Session:
             "band": T.dse_grade_label(q["level"]),
             "descriptor": T.level_descriptor(q["level"]),
             "question": q["question"],
+            "challenge": bool(q.get("challenge")),
+            "challenge_bands": int(q.get("challenge_bands") or 0),
             "warning": self.pending["warning"],
             "source_note": self.pending["source_note"],
             "needs_confirmation": bool(self.pending.get("needs_confirmation")),
@@ -384,6 +389,8 @@ class Session:
             "best_streak": best,
             "streak_multiplier": round(gain_multiplier, 2),
             "band_multiplier": round(band_multiplier, 2),
+            "challenge": bool(q.get("challenge")),
+            "challenge_bands": int(q.get("challenge_bands") or 0),
             "note": note or "",
             "stats": stats,
         }

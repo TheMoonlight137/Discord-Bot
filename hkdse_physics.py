@@ -160,12 +160,22 @@ def _add_long_field(embed: discord.Embed, name: str, text: str) -> None:
 def question_embed(payload: dict, party: bool = False) -> discord.Embed:
     title = (f"HKDSE Physics · Band {payload['level']}/7 "
              f"· HKDSE {payload['band']}-style")
+    if payload.get("challenge"):
+        title = "⚡ Challenge · " + title
     if party:
         title = "🎉 Party · " + title
     embed = discord.Embed(title=title,
                           description=_clip(payload["question"], 4000),
                           color=ACCENT)
     embed.add_field(name="Topic", value=_clip(payload["topic"], 100), inline=True)
+    if payload.get("challenge"):
+        bands = int(payload.get("challenge_bands") or 0)
+        embed.add_field(
+            name="⚡ Challenge",
+            value=f"+{bands} band{'s' if bands != 1 else ''} above your normal level. "
+                  "The harder question itself is the reward.",
+            inline=False,
+        )
     parts = payload.get("parts") or []
     if len(parts) > 1:
         embed.add_field(
