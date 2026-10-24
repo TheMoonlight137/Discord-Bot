@@ -265,15 +265,37 @@ def now_iso() -> str:
 # ---------------------------------------------------------------------------
 
 _NUM_RE = re.compile(r"[-+]?\d*\.?\d+(?:[eE][-+]?\d+)?")
+_SUPERSCRIPT_TRANS = str.maketrans("⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺", "0123456789-+")
+
+
+def _normalize_numeric_text(text) -> str:
+    """Normalize scientific notation before extracting numbers.
+
+    The solver often writes values such as ``6.82 × 10³`` or
+    ``6.82 × 10⁻³``.  The plain regex below cannot read the superscript
+    digits, so those answers would otherwise look like 6.82 and fail
+    verification even when they are correct.
+    """
+    t = str(text).replace(" ", "").replace(",", "")
+    # Superscript exponents, with or without an explicit multiplication sign.
+    t = re.sub(
+        r"([×x·*]?)10([⁰¹²³⁴⁵⁶⁷⁸⁹⁻⁺]+)",
+        lambda m: "e" + m.group(2).translate(_SUPERSCRIPT_TRANS),
+        t,
+    )
+    t = re.sub(
+        r"([×x·*]?)10\^\{?([-+]?\d+)\}?",
+        lambda m: "e" + m.group(2),
+        t,
+    )
+    return t
 
 
 def parse_number(s) -> float | None:
     """Pull the first number out of a string like '9.8 m/s^2' or '3.0e5'."""
     if s is None:
         return None
-    t = str(s).strip()
-    t = t.replace("×10^", "e").replace("x10^", "e").replace("·10^", "e")
-    t = t.replace(",", "")
+    t = _normalize_numeric_text(s).strip()
     m = _NUM_RE.search(t)
     if not m:
         return None
@@ -299,9 +321,7 @@ def answers_match(a, b) -> bool:
 
 
 def _numbers_in(text) -> list[float]:
-    t = str(text).replace(" ", "").replace(",", "")
-    t = t.replace("×10^", "e").replace("x10^", "e").replace("·10^", "e")
-    t = t.replace("*10^", "e")
+    t = _normalize_numeric_text(text)
     out = []
     for match in _NUM_RE.findall(t):
         try:
