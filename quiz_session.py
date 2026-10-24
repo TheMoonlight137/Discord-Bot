@@ -341,6 +341,8 @@ class Session:
         store = self._store()
         try:
             before = store.rating(topic)
+            attempts = store.get_int("attempts")
+            k_attempts = T.k_attempts_for_topic(store, topic, attempts)
             streak_before = store.get_int("streak")
             gain_multiplier = (
                 T.streak_gain_multiplier(streak_before)
@@ -348,12 +350,14 @@ class Session:
             )
             band_multiplier = T.band_gain_multiplier(before) if correct else 1.0
             after, _ = T.updated_rating(
-                before, q["level"], correct, store.get_int("attempts"),
+                before, q["level"], correct, attempts,
                 streak=streak_before, streak_boost=self.streak_boost,
+                k_attempts=k_attempts,
             )
             store.set_rating(topic, after)
             store.record_attempt(self.pending["qid"], correct, user_answer_str,
                                  before, after)
+            T.reset_k_on_level_up(store, topic, before, after, attempts)
 
             if correct:
                 streak = store.get_int("streak") + 1

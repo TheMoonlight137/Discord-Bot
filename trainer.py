@@ -210,7 +210,7 @@ JSON_MODE_PROVIDERS = {"deepseek", "groq", "gemini", "openai", "cerebras", "mist
 
 # --- adaptive difficulty tuning -------------------------------------------
 START_RATING = 1000.0     # Elo-style skill estimate
-K_MAX, K_MIN, K_RAMP = 80.0, 48.0, 80.0   # update speed, fast at first
+K_MAX, K_MIN, K_RAMP = 88.0, 56.0, 80.0   # update speed; reset after a level-up
 WRONG_DAMPING = 0.35      # a wrong answer lowers the target only gently
 TARGET_P = 0.72           # aim for ~72% success probability
 TARGET_OFFSET = 400.0 * math.log10((1.0 - TARGET_P) / TARGET_P)  # ≈ -164 Elo
@@ -377,6 +377,33 @@ def band_gain_multiplier(rating: float) -> float:
     return BAND_GAIN_FACTORS[user_level(rating) - 1]
 
 
+def k_attempts_for_topic(store: Store, topic: str, attempts: int) -> int:
+    """Attempts since this topic last reached a new highest level."""
+    anchor = store.get_int(f"k_anchor:{topic}", 0)
+    return max(0, attempts - anchor)
+
+
+def reset_k_on_level_up(store: Store, topic: str, before_rating: float,
+                        after_rating: float, attempts: int) -> None:
+    """Give the next answer a fresh K-factor after a new highest level.
+
+    ``attempts`` is the count before the current answer; the next answer sees
+    ``attempts + 1``, so storing that as the anchor makes its K reset to 80.
+    The peak is tracked so dropping and re-entering the same level does not
+    repeatedly reset K.
+    """
+    before_level = user_level(before_rating)
+    after_level = user_level(after_rating)
+    peak_key = f"k_peak:{topic}"
+    stored_peak = store.get_int(peak_key, -1)
+    peak = max(stored_peak, before_level)
+    if after_level > peak:
+        store.set(peak_key, after_level)
+        store.set(f"k_anchor:{topic}", attempts + 1)
+    elif stored_peak < 0:
+        store.set(peak_key, peak)
+
+
 def streak_gain_multiplier(streak: int) -> float:
     """Solo-only multiplier for a correct-answer Elo gain.
 
@@ -388,15 +415,21 @@ def streak_gain_multiplier(streak: int) -> float:
 
 
 def updated_rating(rating: float, level: int, correct: bool, attempts: int,
-                   streak: int = 0, streak_boost: bool = False):
+                   streak: int = 0, streak_boost: bool = False,
+                   k_attempts: int | None = None):
     """Returns (new_rating, expected_success_probability).
 
     The correct-answer gain is reduced at higher player levels. With
     ``streak_boost`` (solo mode), it also grows exponentially with the current
     correct-answer streak. Wrong answers still apply the normal gentle penalty
     and reset the streak.
+
+    ``k_attempts`` is the number of answers since the last K reset; it defaults
+    to the total attempts for callers that do not use level-up resets.
     """
-    k = K_MIN + (K_MAX - K_MIN) * max(0.0, 1.0 - attempts / K_RAMP)
+    if k_attempts is None:
+        k_attempts = attempts
+    k = K_MIN + (K_MAX - K_MIN) * max(0.0, 1.0 - k_attempts / K_RAMP)
     p = 1.0 / (1.0 + 10 ** ((elo_of_level(level) - rating) / 400.0))
     if correct:
         delta = k * (1.0 - p) * band_gain_multiplier(rating)
@@ -1758,13 +1791,17 @@ def main() -> None:
             normalized = " | ".join(answers)
 
             before = store.rating(q["topic"])
+            attempts = store.get_int("attempts")
+            k_attempts = k_attempts_for_topic(store, q["topic"], attempts)
             streak_before = store.get_int("streak")
             after, _ = updated_rating(
-                before, q["level"], correct, store.get_int("attempts"),
+                before, q["level"], correct, attempts,
                 streak=streak_before, streak_boost=True,
+                k_attempts=k_attempts,
             )
             store.set_rating(q["topic"], after)
             store.record_attempt(qid, correct, normalized, before, after)
+            reset_k_on_level_up(store, q["topic"], before, after, attempts)
 
             if correct:
                 streak = store.get_int("streak") + 1
