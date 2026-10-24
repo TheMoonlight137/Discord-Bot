@@ -23,6 +23,12 @@ CFG: dict = {}
 SESSIONS: dict[str, "Session"] = {}
 SESSIONS_LOCK = threading.Lock()
 
+# 2025 Physics cutoffs (Level 2 40%, 3 48%, 4 63%, 5 79%, 5* 87%, 5** 93%)
+# mapped onto the seven-question placement test. One question is asked per
+# level, so the boundaries are deliberately coarse; the adaptive Elo system
+# refines the estimate afterwards.
+PLACEMENT_LEVEL_BY_CORRECT = (1, 1, 2, 3, 4, 5, 6, 7)
+
 
 def load_env_file(path: str) -> None:
     p = Path(path).expanduser()
@@ -113,7 +119,7 @@ class Session:
             store.set(key, "")
 
     def _next_placement_band(self, store: T.Store) -> int | None:
-        """Return the next band for a fresh user, or None if placement is done."""
+        """Return the next placement level, or None if placement is done."""
         if store.get("placement_done") == "1" or store.get_int("attempts") > 0:
             return None
         index = store.get_int("placement_index")
@@ -374,19 +380,13 @@ class Session:
             complete = len(results) >= T.MAX_LEVEL
             final_band = None
             if complete:
-                correct_bands = [
-                    int(item.get("band", 0)) for item in results
+                count_correct = sum(
+                    1 for item in results
                     if isinstance(item, dict) and item.get("correct")
+                )
+                final_band = PLACEMENT_LEVEL_BY_CORRECT[
+                    min(count_correct, T.MAX_LEVEL)
                 ]
-                max_correct = max(correct_bands, default=0)
-                count_correct = len(correct_bands)
-                if count_correct:
-                    final_band = int(T.clamp(
-                        (max_correct + count_correct) / 2 + 0.5,
-                        1, T.MAX_LEVEL,
-                    ))
-                else:
-                    final_band = 1
                 final_rating = T.elo_of_level(final_band) - T.TARGET_OFFSET
                 for topic in T.ALL_TOPICS:
                     store.set_rating(topic, final_rating)

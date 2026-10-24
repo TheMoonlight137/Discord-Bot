@@ -158,7 +158,7 @@ def _add_long_field(embed: discord.Embed, name: str, text: str) -> None:
 
 
 def question_embed(payload: dict, party: bool = False) -> discord.Embed:
-    title = (f"HKDSE Physics · Band {payload['level']}/7 "
+    title = (f"HKDSE Physics · Level {payload['level']}/7 "
              f"· HKDSE {payload['band']}-style")
     if payload.get("challenge"):
         title = "⚡ Challenge · " + title
@@ -171,18 +171,18 @@ def question_embed(payload: dict, party: bool = False) -> discord.Embed:
                           color=ACCENT)
     embed.add_field(name="Topic", value=_clip(payload["topic"], 100), inline=True)
     if payload.get("placement"):
-        band = int(payload.get("placement_band") or payload["level"])
+        level = int(payload.get("placement_band") or payload["level"])
         embed.add_field(
             name="🧭 Initial placement",
-            value=f"Question {band} of {payload.get('placement_total', 7)} — "
-                  "one question from each band across all topics sets your starting level.",
+            value=f"Question {level} of {payload.get('placement_total', 7)} — "
+                  "one question from each level across all topics sets your starting level.",
             inline=False,
         )
     if payload.get("challenge"):
-        bands = int(payload.get("challenge_bands") or 0)
+        levels = int(payload.get("challenge_bands") or 0)
         embed.add_field(
             name="⚡ Challenge",
-            value=f"+{bands} band{'s' if bands != 1 else ''} above your normal level. "
+            value=f"+{levels} level{'s' if levels != 1 else ''} above your normal level. "
                   "The harder question itself is the reward.",
             inline=False,
         )
@@ -234,13 +234,13 @@ def result_embed(result: dict) -> discord.Embed:
     band_multiplier = float(result.get("band_multiplier") or 1.0)
     gain_notes = []
     if correct and band_multiplier < 1.0:
-        gain_notes.append(f"×{band_multiplier:g} band gain")
+        gain_notes.append(f"×{band_multiplier:g} level gain")
     if correct and multiplier > 1.0:
         gain_notes.append(f"×{multiplier:g} streak gain")
     gain_note = (" · " + " · ".join(gain_notes)) if gain_notes else ""
     embed.set_footer(text=(
         f"Rating {result['rating_before']} → {result['rating_after']}{gain_note} · "
-        f"band {result['band']} · streak {result['streak']} "
+        f"level {result['band']} · streak {result['streak']} "
         f"(best {result['best_streak']})"
     ))
     return embed
@@ -273,17 +273,17 @@ def placement_result_embed(result: dict) -> discord.Embed:
     if result.get("solution"):
         _add_long_field(embed, "Solution", result["solution"])
     if complete:
-        band = int(result.get("placement_band") or 1)
+        level = int(result.get("placement_band") or 1)
         embed.add_field(
-            name="Starting band",
-            value=f"Band {band}/7 · HKDSE {T.dse_grade_label(band)}-style "
+            name="Starting level",
+            value=f"Level {level}/7 · HKDSE {T.dse_grade_label(level)}-style "
                   "question difficulty. This is a starting point, not a predicted grade.",
             inline=False,
         )
         embed.set_footer(text="Placement complete — start training when ready.")
     else:
         embed.set_footer(
-            text=f"Placement {index}/{total} · band "
+            text=f"Placement {index}/{total} · level "
                  f"{result.get('placement_answered_band')} question checked"
         )
     return embed
@@ -304,11 +304,11 @@ def stats_embed(stats: dict) -> discord.Embed:
         pct = round(100 * row["correct"] / row["asked"])
         return f"{row['correct']}/{row['asked']} ({pct}%)"
 
-    lines = [f"**Overall** · rating {overall['rating']} · band {overall['band']} "
+    lines = [f"**Overall** · rating {overall['rating']} · level {overall['band']} "
              f"· {acc(overall)}", ""]
     for row in stats["topics"]:
         lines.append(f"**{row['topic']}** · rating {row['rating']} "
-                     f"· band {row['band']} · {acc(row)}")
+                     f"· level {row['band']} · {acc(row)}")
     lines += ["", f"Streak {stats['streak']} · best {stats['best_streak']} "
                   f"· {stats['questions']} questions generated"]
     if not stats.get("placement_done", True):

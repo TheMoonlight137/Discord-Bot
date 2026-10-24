@@ -215,15 +215,15 @@ WRONG_DAMPING = 0.35      # a wrong answer lowers the target only gently
 TARGET_P = 0.72           # aim for ~72% success probability
 TARGET_OFFSET = 400.0 * math.log10((1.0 - TARGET_P) / TARGET_P)  # ≈ -164 Elo
 JITTER = 70.0             # random spread on the target difficulty (Elo points)
-LEVEL_BASE, LEVEL_STEP = 500.0, 160.0     # seven practice bands, not grade predictions
+LEVEL_BASE, LEVEL_STEP = 500.0, 160.0     # seven practice levels, not grade predictions
 MAX_LEVEL = 7
 REASK_GAP = 8             # missed questions return after ~8 more questions
 LONG_QUESTION_CHARS = 240 # verify these only after the user answers
 STREAK_GAIN_FACTOR = 2.0  # solo Elo gain doubles per consecutive correct answer
 STREAK_GAIN_CAP = 4.0     # ...until this cap
-CHALLENGE_CHANCE = 0.12   # solo-only chance of a random higher-band question
-# Correct-answer gain multiplier by the player's current band. Climbing gets
-# slower at higher bands, like a climbing-speed decay in an arcade ladder.
+CHALLENGE_CHANCE = 0.12   # solo-only chance of a random higher-level question
+# Correct-answer gain multiplier by the player's current level. Climbing gets
+# slower at higher levels, like a climbing-speed decay in an arcade ladder.
 BAND_GAIN_FACTORS = (1.00, 0.95, 0.90, 0.80, 0.70, 0.60, 0.50)
 
 # ---------------------------------------------------------------------------
@@ -368,11 +368,11 @@ def user_level(rating: float) -> int:
 
 
 def band_gain_multiplier(rating: float) -> float:
-    """Return the correct-answer gain multiplier for the player's current band.
+    """Return the correct-answer gain multiplier for the player's current level.
 
-    The multiplier is based on the player's band before the answer, not the
-    question's band. That keeps hard questions attractive while making each
-    successive band slower to climb.
+    The multiplier is based on the player's level before the answer, not the
+    question's level. That keeps hard questions attractive while making each
+    successive level slower to climb.
     """
     return BAND_GAIN_FACTORS[user_level(rating) - 1]
 
@@ -391,7 +391,7 @@ def updated_rating(rating: float, level: int, correct: bool, attempts: int,
                    streak: int = 0, streak_boost: bool = False):
     """Returns (new_rating, expected_success_probability).
 
-    The correct-answer gain is reduced at higher player bands. With
+    The correct-answer gain is reduced at higher player levels. With
     ``streak_boost`` (solo mode), it also grows exponentially with the current
     correct-answer streak. Wrong answers still apply the normal gentle penalty
     and reset the streak.
@@ -420,7 +420,7 @@ def level_descriptor(level: int) -> str:
 
 
 def dse_grade_label(level: int) -> str:
-    """Reference label for the seven practice bands; not a predicted grade."""
+    """Reference label for the seven practice levels; not a predicted grade."""
     return ["1", "2", "3", "4", "5", "5*", "5**"][int(clamp(level, 1, MAX_LEVEL)) - 1]
 
 
@@ -717,7 +717,7 @@ GEN_USER_TMPL = """Write ONE HKDSE Physics quiz problem. It may have one part, o
 HKDSE syllabus section: {topic}
 Allowed syllabus content: {subtopic}
 Explicitly excluded by the HKDSE syllabus (do not require, mention or teach these): {exclusions}
-Difficulty: practice band {level} of 7 (reference label HKDSE {grade_label}-style; not a prediction of the student's grade) — {rubric}
+Difficulty: practice level {level} of 7 (reference label HKDSE {grade_label}-style; not a prediction of the student's grade) — {rubric}
 {extra}
 Requirements:
 - Test only the allowed syllabus content above; do not draw on other physics topics.
@@ -1282,7 +1282,7 @@ def next_question(llm: LLM | None, store: Store, topics: list[str],
 def show_question(q: dict, source_note: str | None, warning: str | None) -> None:
     print()
     print(dim("─" * 74))
-    meta = (f"{q['topic']} · practice band {q['level']}/7 "
+    meta = (f"{q['topic']} · practice level {q['level']}/7 "
             f"(HKDSE {dse_grade_label(q['level'])}-style) · {level_descriptor(q['level'])}")
     if q.get("challenge"):
         meta = "⚡ CHALLENGE · " + meta
@@ -1577,7 +1577,7 @@ def show_result(q: dict, user_answer, correct: bool, note: str | None,
 def print_stats(store: Store, topics: list[str]) -> None:
     stats = store.topic_stats()
     print()
-    print(bold(f"  {'topic':<40}{'rating':>8}{'band':>7}{'asked':>7}{'acc':>6}"))
+    print(bold(f"  {'topic':<40}{'rating':>8}{'level':>7}{'asked':>7}{'acc':>6}"))
     total_a = total_c = 0
     for t in topics:
         r = store.rating(t)
@@ -1662,7 +1662,7 @@ def parse_args():
                    help="comma-separated HKDSE sections: heat, motion, waves, electricity, "
                         "radioactivity, atomic/elective2, energy/elective3 — or 'all'")
     p.add_argument("--start-level", type=int, choices=range(1, MAX_LEVEL + 1), metavar="1-7",
-                   help="initial practice band (1,2,3,4,5,6=5*,7=5**; fresh progress only)")
+                   help="initial practice level (1,2,3,4,5,6=5*,7=5**; fresh progress only)")
     p.add_argument("--no-verify", action="store_true",
                    help="skip the second-model answer check (saves API calls, less safe)")
     p.add_argument("--thinking", action=argparse.BooleanOptionalAction, default=None,
@@ -1792,8 +1792,8 @@ def main() -> None:
         print(dim(f"session: {session_asked} answered · {session_correct} correct "
                   f"({session_correct / session_asked:.0%})"))
     overall = sum(store.rating(t) for t in topics) / len(topics)
-    band = user_level(overall)
-    print(f"overall practice band {band}/7 (HKDSE {dse_grade_label(band)}-style question difficulty; "
+    level = user_level(overall)
+    print(f"overall practice level {level}/7 (HKDSE {dse_grade_label(level)}-style question difficulty; "
           "not a predicted grade) · use 'stats' for the topic breakdown")
     print(dim("see you next time."))
 
