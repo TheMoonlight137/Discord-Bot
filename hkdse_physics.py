@@ -78,7 +78,9 @@ def _configure() -> None:
     base_url = os.environ.get("PHYSICS_TRAINER_BASE_URL") or "https://api.deepseek.com"
     model = os.environ.get("PHYSICS_TRAINER_MODEL") or "deepseek-flash"
 
-    llm = T.LLM("deepseek", model, key or "", base_url, thinking=False) if key else None
+    # Multi-step HKDSE calculations need reasoning; disabling it made both the
+    # generated answer and the independent solver prone to arithmetic errors.
+    llm = T.LLM("deepseek", model, key or "", base_url, thinking=True) if key else None
 
     sessions_dir = Path("~/.local/share/physics-trainer/discord").expanduser()
     sessions_dir.mkdir(parents=True, exist_ok=True)
