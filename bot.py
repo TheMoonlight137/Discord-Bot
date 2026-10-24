@@ -716,4 +716,7 @@ async def _restart_bot():
     subprocess.run(["systemctl", "--user", "restart", "discord-bot"])
 
 
+import hkdse_physics
+hkdse_physics.setup(bot)
+
 bot.run(os.environ["DISCORD_TOKEN"])
