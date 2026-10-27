@@ -202,7 +202,7 @@ async def ping(interaction: discord.Interaction):
 @app_commands.allowed_installs(guilds=True, users=True)
 @app_commands.describe(message="The message the bot should send")
 async def say(interaction: discord.Interaction, message: str):
-    if interaction.user.id != OWNER_ID and interaction.user.id != "772721325164462101":
+    if interaction.user.id != OWNER_ID and interaction.user.id != 772721325164462101:
         await interaction.response.send_message(DENIED_MSG)
         return
     try:
